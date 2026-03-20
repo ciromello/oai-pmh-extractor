@@ -62,8 +62,10 @@ if run_button:
                     # --- Simple field ---
                     if mode == "Simple Field":
                         try:
-                            prefix, tag = field.split(":")
-                            elements = record.findall(f".//{prefix}:{tag}", NS)
+                            # Extract just the tag name (ignore prefix)
+                            tag = field.split(":")[-1]
+                            # Find elements regardless of namespace
+                            elements = record.findall(f".//{{*}}{tag}")
                         except:
                             st.error("Invalid field format. Use prefix:tag (e.g., edm:hasType)")
                             st.stop()
@@ -117,4 +119,3 @@ if run_button:
 
         except Exception as e:
             st.error(f"Error: {e}")
-          
