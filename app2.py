@@ -17,7 +17,7 @@ base_url = st.sidebar.text_input("OAI-PMH Base URL", "https://OAI-PMH Base URL/o
 
 metadata_prefix = st.sidebar.selectbox(
     "Metadata Format",
-    ["oai_dc", "marc21", "mods", "dim"],
+    ["oai_dc", "marc21", "marcxml", "mods", "dim"],
     index=0
 )
 
