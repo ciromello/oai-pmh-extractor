@@ -1,123 +1,110 @@
+import streamlit as st
 import requests
 import xml.etree.ElementTree as ET
-from collections import Counter
-import csv
-import time
-import urllib3
+import pandas as pd
+from io import StringIO
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+st.title("OAI-PMH Harvester (Flexible)")
 
-# Optional: helps on Windows corporate environments
-try:
-    import certifi
-    VERIFY = False
-except ImportError:
-    VERIFY = True  # fallback
+# ----------------------
+# User Inputs
+# ----------------------
+base_url = st.text_input("OAI-PMH Base URL", "https://bdta.ufra.edu.br/oai/request")
+metadata_prefix = st.text_input("Metadata Prefix", "oai_dc")
+field_input = st.text_input("Field (DC: dc:title | MARC: 245$a)", "dc:title")
+deduplicate = st.checkbox("Remove duplicates", True)
 
-# If you're behind a corporate proxy and still get SSL errors,
-# uncomment the next two lines:
-# import urllib3
-# urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-# VERIFY = False
-
-BASE_URL = "https://bdta.ufra.edu.br/oai/request"
-
-NS = {
-    "oai": "http://www.openarchives.org/OAI/2.0/",
-    "dc": "http://purl.org/dc/elements/1.1/"
+# Namespaces
+namespaces = {
+    'oai': 'http://www.openarchives.org/OAI/2.0/',
+    'dc': 'http://purl.org/dc/elements/1.1/',
+    'marc': 'http://www.loc.gov/MARC21/slim'
 }
 
-params = {
-    "verb": "ListRecords",
-    "metadataPrefix": "oai_dc"
-}
+# ----------------------
+# Helper Functions
+# ----------------------
 
-counter = Counter()
-total_records = 0
-page = 1
-
-
-def fetch_with_retry(url, params, retries=3):
-    for attempt in range(retries):
-        try:
-            response = requests.get(
-                url,
-                params=params,
-                timeout=60,
-                verify=VERIFY
-            )
-            response.raise_for_status()
-            return response
-        except requests.exceptions.RequestException as e:
-            print(f"Request failed (attempt {attempt + 1}): {e}")
-            time.sleep(5)
-
-    raise Exception("Failed after multiple retries")
+def parse_dc(metadata, field):
+    values = []
+    elements = metadata.findall(f".//{field}", namespaces)
+    for el in elements:
+        if el.text:
+            values.append(el.text.strip())
+    return values
 
 
-with open("hasType_all.txt", "w", encoding="utf-8") as raw_file:
+def parse_marc(metadata, field_input):
+    values = []
+    try:
+        tag, subfield = field_input.split('$')
+    except ValueError:
+        return values
 
-    while True:
-        print(f"\nFetching page {page}...")
+    for datafield in metadata.findall(f".//marc:datafield[@tag='{tag}']", namespaces):
+        for sub in datafield.findall(f"marc:subfield[@code='{subfield}']", namespaces):
+            if sub.text:
+                values.append(sub.text.strip())
+    return values
 
-        response = fetch_with_retry(BASE_URL, params)
+# ----------------------
+# Harvest Button
+# ----------------------
+if st.button("Harvest"):
+    records = []
+    url = f"{base_url}?verb=ListRecords&metadataPrefix={metadata_prefix}"
+    total_records = 0
 
-        root = ET.fromstring(response.content)
+    progress = st.progress(0)
+    status = st.empty()
 
-        records = root.findall(".//oai:record", NS)
+    with st.spinner("Harvesting records..."):
+        while True:
+            response = requests.get(url)
+            if response.status_code != 200:
+                st.error("Error fetching data")
+                break
 
-        if not records:
-            print("⚠️ No records found on this page")
+            root = ET.fromstring(response.content)
+            batch_count = 0
 
-        for record in records:
-            total_records += 1
+            for record in root.findall('.//oai:record', namespaces):
+                metadata = record.find('.//oai:metadata', namespaces)
+                if metadata is not None:
+                    if metadata_prefix.startswith("oai_dc"):
+                        values = parse_dc(metadata, field_input)
+                    else:
+                        values = parse_marc(metadata, field_input)
 
-            # Correct field for oai_dc
-            types = record.findall(".//dc:type", NS)
+                    records.extend(values)
+                    batch_count += 1
 
-            for t in types:
-                if t.text:
-                    value = t.text.strip()
+            total_records += batch_count
+            status.text(f"Processed {total_records} records...")
+            progress.progress(min(100, total_records % 100))
 
-                    # Save raw values
-                    raw_file.write(value + "\n")
+            # Resumption Token
+            token = root.find('.//oai:resumptionToken', namespaces)
+            if token is not None and token.text:
+                url = f"{base_url}?verb=ListRecords&resumptionToken={token.text}"
+            else:
+                break
 
-                    # Count
-                    counter[value] += 1
+    # Deduplicate
+    if deduplicate:
+        records = list(set(records))
 
-        print(f"  Processed records so far: {total_records}")
+    st.success(f"Harvested {len(records)} values")
 
-        # Progress indicator
-        if total_records % 1000 == 0:
-            print(f"  ✅ Reached {total_records} records")
+    # Display
+    df = pd.DataFrame(records, columns=["Value"])
+    st.dataframe(df)
 
-        # Handle resumptionToken
-        token_elem = root.find(".//oai:resumptionToken", NS)
-
-        if token_elem is None or not token_elem.text:
-            print("\nNo more pages.")
-            break
-
-        params = {
-            "verb": "ListRecords",
-            "resumptionToken": token_elem.text.strip()
-        }
-
-        page += 1
-
-        # Be polite to server
-        time.sleep(1)
-
-
-# Save aggregated counts
-with open("hasType_counts.csv", "w", newline="", encoding="utf-8") as csvfile:
-    writer = csv.writer(csvfile)
-    writer.writerow(["type", "count"])
-
-    for value, count in counter.most_common():
-        writer.writerow([value, count])
-
-
-print("\n🎉 Done!")
-print(f"Total records processed: {total_records}")
-print(f"Unique type values: {len(counter)}")
+    # CSV Export
+    csv = df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download CSV",
+        data=csv,
+        file_name="harvest.csv",
+        mime="text/csv"
+    )
