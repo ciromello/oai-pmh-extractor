@@ -13,7 +13,7 @@ st.markdown("Harvest metadata from any OAI-PMH repository with flexible options.
 # ----------------------
 st.sidebar.header("⚙️ Configuration")
 
-base_url = st.sidebar.text_input("OAI-PMH Base URL", "https://bdta.ufra.edu.br/oai/request")
+base_url = st.sidebar.text_input("OAI-PMH Base URL", "https://OAI-PMH Base URL/oai/request")
 
 metadata_prefix = st.sidebar.selectbox(
     "Metadata Format",
