@@ -4,7 +4,7 @@ from xml.etree import ElementTree as ET
 import pandas as pd
 
 st.set_page_config(page_title="OAI‑PMH Harvester", layout="wide")
-st.title("OAI‑PMH Extractor — Fully Open Fields/Subfields")
+st.title("OAI‑PMH Extractor — Open Metadata & Fields/Subfields")
 
 # --- 1️⃣ Base URL input ---
 base_url = st.text_input(
@@ -13,21 +13,19 @@ base_url = st.text_input(
     help="Enter the base URL of the OAI-PMH repository"
 )
 
-# --- 2️⃣ Metadata format selection ---
-metadata_options = [
-    "oai_dc", "marc21", "marcxml", "mods", "dim", "emd", "md", "mets"
-]
-metadata_prefix = st.selectbox(
-    "Metadata Format (metadataPrefix)",
-    options=metadata_options,
-    index=0,
-    help="Select the metadata format to harvest"
+# --- 2️⃣ Metadata format (metadataPrefix) ---
+st.markdown("### Metadata Format (metadataPrefix)")
+metadata_suggestions = ["oai_dc", "marc21", "marcxml", "mods", "dim", "emd", "md", "mets"]
+metadata_prefix = st.text_input(
+    "Metadata Format",
+    value="oai_dc",
+    help="Enter the metadata format to harvest. Examples: oai_dc, marcxml, mods, etc."
 )
 
-# --- 3️⃣ Fields & Subfields selection ---
+# --- 3️⃣ Fields & Subfields ---
 st.markdown("### Fields & Subfields to Extract")
 st.markdown(
-    "Select suggested fields or type any field/subfield manually (one per line, e.g., `dc:type`, `marc:245$a`)."
+    "You can select suggested fields or type any field/subfield manually (one per line, e.g., `dc:type`, `marc:245$a`)."
 )
 
 # Suggested fields dropdown
@@ -48,7 +46,7 @@ manual_fields = st.text_area(
     help="Enter any additional fields/subfields you want to harvest, one per line"
 )
 
-# Combine both lists into final fields to extract
+# Combine both lists
 manual_fields_list = [f.strip() for f in manual_fields.splitlines() if f.strip()]
 fields_to_extract = list(set(selected_fields + manual_fields_list))
 
