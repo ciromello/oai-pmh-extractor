@@ -4,13 +4,13 @@ from xml.etree import ElementTree as ET
 import pandas as pd
 
 st.set_page_config(page_title="OAI‑PMH Harvester", layout="wide")
-st.title("OAI‑PMH Extractor — Fields & Subfields")
+st.title("OAI‑PMH Extractor — Fully Open Fields/Subfields")
 
 # --- 1️⃣ Base URL input ---
 base_url = st.text_input(
     "OAI‑PMH Base URL",
     value="https://OAI-PMH_Base_URL/oai/request",
-    help="Enter the base URL of the OAI-PMH repository (example: https://bdta.ufra.edu.br/oai/request)"
+    help="Enter the base URL of the OAI-PMH repository"
 )
 
 # --- 2️⃣ Metadata format selection ---
@@ -24,39 +24,39 @@ metadata_prefix = st.selectbox(
     help="Select the metadata format to harvest"
 )
 
-# --- 3️⃣ Field & Subfield selection ---
+# --- 3️⃣ Fields & Subfields selection ---
 st.markdown("### Fields & Subfields to Extract")
 st.markdown(
-    "You can select suggested fields or manually type any field/subfield in the format `dc:type`, `dc:creator`, etc."
+    "Select suggested fields or type any field/subfield manually (one per line, e.g., `dc:type`, `marc:245$a`)."
 )
 
-# Suggested fields dropdown (multi-select)
+# Suggested fields dropdown
 field_suggestions = [
     "dc:title", "dc:creator", "dc:subject", "dc:description",
     "dc:type", "dc:publisher", "dc:date", "dc:identifier"
 ]
 selected_fields = st.multiselect(
-    "Select Suggested Fields",
+    "Suggested Fields",
     options=field_suggestions,
     default=["dc:type"]
 )
 
 # Manual fields input
 manual_fields = st.text_area(
-    "Manual Fields (one per line)",
+    "Manual Fields/Subfields",
     placeholder="dc:type\ndc:creator\nmarc:245$a",
-    help="Enter any field/subfield you want to harvest, one per line"
+    help="Enter any additional fields/subfields you want to harvest, one per line"
 )
 
 # Combine both lists into final fields to extract
 manual_fields_list = [f.strip() for f in manual_fields.splitlines() if f.strip()]
 fields_to_extract = list(set(selected_fields + manual_fields_list))
 
-# --- 4️⃣ Run Extraction button ---
+# --- 4️⃣ Run Extraction ---
 if st.button("Run Extraction"):
 
     if not fields_to_extract:
-        st.warning("Please select or enter at least one field to extract.")
+        st.warning("Please select or enter at least one field/subfield to extract.")
     else:
         st.info(f"Fetching records from {base_url} using metadata format '{metadata_prefix}'...")
 
@@ -77,7 +77,7 @@ if st.button("Run Extraction"):
                 # Parse XML
                 xml_root = ET.fromstring(response.text)
 
-                # Define default namespaces
+                # Default namespaces
                 ns = {
                     "oai": "http://www.openarchives.org/OAI/2.0/",
                     "dc": "http://purl.org/dc/elements/1.1/",
@@ -97,29 +97,26 @@ if st.button("Run Extraction"):
                     for rec in records:
                         row = {}
                         for field in fields_to_extract:
-                            # Support namespaces like dc or marc
-                            if ':' in field:
+                            if ":" in field:
                                 prefix, tag_name = field.split(":", 1)
                             else:
                                 prefix, tag_name = "", field
 
-                            # Use namespace if available
                             ns_prefix = ns.get(prefix, "")
                             if ns_prefix:
                                 nodes = rec.findall(f".//{prefix}:{tag_name}", ns)
                             else:
                                 nodes = rec.findall(f".//{tag_name}")
 
-                            # Join multiple values
                             row[field] = "; ".join([n.text for n in nodes if n.text])
                         data_rows.append(row)
 
-                    # Convert to DataFrame and display
+                    # Convert to DataFrame
                     df = pd.DataFrame(data_rows)
                     st.write("### Extracted Records")
                     st.dataframe(df)
 
-                    # Download button
+                    # CSV download
                     csv = df.to_csv(index=False).encode('utf-8')
                     st.download_button(
                         label="Download CSV",
@@ -129,7 +126,7 @@ if st.button("Run Extraction"):
                     )
 
         except requests.exceptions.SSLError as ssl_err:
-            st.error("SSL Error — certificate verification failed. You may use verify=False for testing.")
+            st.error("SSL Error — certificate verification failed. Use verify=False for testing.")
             st.text(str(ssl_err))
 
         except Exception as e:
