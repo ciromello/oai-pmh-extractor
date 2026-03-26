@@ -1,15 +1,16 @@
 import streamlit as st
 import requests
 from xml.etree import ElementTree as ET
+import pandas as pd
 
-st.set_page_config(page_title="OAI‑PMH Extractor", layout="wide")
-st.title("OAI‑PMH Extractor")
+st.set_page_config(page_title="OAI‑PMH Harvester", layout="wide")
+st.title("OAI‑PMH Extractor — Fields & Subfields")
 
 # --- 1️⃣ Base URL input ---
 base_url = st.text_input(
     "OAI‑PMH Base URL",
     value="https://OAI-PMH_Base_URL/oai/request",
-    help="Enter the base URL of the OAI-PMH repository (example: https://bdta.ufra.edu.br/oai/request)"
+    help="Enter the base URL of the OAI-PMH repository"
 )
 
 # --- 2️⃣ Metadata format selection ---
@@ -23,16 +24,16 @@ metadata_prefix = st.selectbox(
     help="Select the metadata format to harvest"
 )
 
-# --- 3️⃣ Field selection ---
+# --- 3️⃣ Field & Subfield selection ---
 field_suggestions = [
-    "dc:title", "dc:creator", "dc:subject", "dc:description", 
+    "dc:title", "dc:creator", "dc:subject", "dc:description",
     "dc:type", "dc:publisher", "dc:date", "dc:identifier"
 ]
-field_to_extract = st.selectbox(
-    "Field to Extract",
+fields_to_extract = st.multiselect(
+    "Fields to Extract (can select multiple)",
     options=field_suggestions,
-    index=4,
-    help="Select which field to extract from the records"
+    default=["dc:type"],
+    help="Select one or more fields to extract from the records"
 )
 
 # --- 4️⃣ Run button ---
@@ -46,7 +47,7 @@ if st.button("Run Extraction"):
     }
 
     try:
-        # SSL verification disabled for testing (set verify=True in production)
+        # Make request, ignoring SSL verification for testing
         response = requests.get(base_url, params=params, verify=False, timeout=20)
 
         if response.status_code != 200:
@@ -54,10 +55,10 @@ if st.button("Run Extraction"):
         else:
             st.success("Records fetched successfully!")
 
-            # Parse XML response
+            # Parse XML
             xml_root = ET.fromstring(response.text)
 
-            # Common namespaces for OAI-PMH and Dublin Core
+            # Define namespaces for OAI-PMH and Dublin Core
             ns = {
                 "oai": "http://www.openarchives.org/OAI/2.0/",
                 "dc": "http://purl.org/dc/elements/1.1/"
@@ -65,25 +66,39 @@ if st.button("Run Extraction"):
 
             # Extract records
             records = xml_root.findall(".//oai:record", ns)
-            extracted_values = []
 
-            for rec in records:
-                # Get the tag name after colon
-                tag_name = field_to_extract.split(":")[1]
-                field_nodes = rec.findall(f".//dc:{tag_name}", ns)
-                values = [n.text for n in field_nodes if n.text]
-                extracted_values.extend(values)
-
-            # Display results
-            if extracted_values:
-                st.write(f"Extracted {len(extracted_values)} values for `{field_to_extract}`:")
-                for idx, val in enumerate(extracted_values, 1):
-                    st.write(f"{idx}. {val}")
+            if not records:
+                st.warning("No records found.")
             else:
-                st.warning(f"No values found for field `{field_to_extract}` in the retrieved records.")
+                st.info(f"Found {len(records)} records. Extracting fields...")
+
+                data_rows = []
+
+                for rec in records:
+                    row = {}
+                    for field in fields_to_extract:
+                        tag_name = field.split(":")[1]
+                        nodes = rec.findall(f".//dc:{tag_name}", ns)
+                        # join multiple values with semicolon
+                        row[field] = "; ".join([n.text for n in nodes if n.text])
+                    data_rows.append(row)
+
+                # Convert to DataFrame and display
+                df = pd.DataFrame(data_rows)
+                st.write("### Extracted Records")
+                st.dataframe(df)
+
+                # Optional: allow export
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download CSV",
+                    data=csv,
+                    file_name='oai_records.csv',
+                    mime='text/csv'
+                )
 
     except requests.exceptions.SSLError as ssl_err:
-        st.error("SSL Error — certificate verification failed.")
+        st.error("SSL Error — certificate verification failed. You may use verify=False for testing.")
         st.text(str(ssl_err))
 
     except Exception as e:
