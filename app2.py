@@ -9,7 +9,7 @@ st.title("📡 Universal OAI-PMH Harvester (DC & MARC XML)")
 # ----------------------------
 # User Inputs
 # ----------------------------
-base_url = st.text_input("OAI-PMH Base URL", "https://bdta.ufra.edu.br/oai/request")
+base_url = st.text_input("OAI-PMH Base URL", "")  # Blank by default
 metadata_format = st.selectbox("Metadata Format", ["oai_dc", "marcxml"])
 field_to_harvest = st.text_input(
     "Field to Harvest",
@@ -19,10 +19,14 @@ field_to_harvest = st.text_input(
 download_filename = st.text_input("CSV filename", "harvested_records.csv")
 
 # ----------------------------
-# Button to start harvesting
+# Start harvesting only if Base URL is provided
 # ----------------------------
 if st.button("Start Harvesting"):
 
+    if not base_url.strip():
+        st.error("Please enter a valid OAI-PMH Base URL to start harvesting.")
+        st.stop()
+    
     st.info("Harvesting records. This may take some time…")
     
     # Determine namespaces
@@ -31,7 +35,6 @@ if st.button("Start Harvesting"):
             'oai': 'http://www.openarchives.org/OAI/2.0/',
             'dc': 'http://purl.org/dc/elements/1.1/'
         }
-        # Split field_to_harvest
         try:
             prefix, tag = field_to_harvest.split(":")
         except ValueError:
@@ -68,12 +71,10 @@ if st.button("Start Harvesting"):
                     continue
                 
                 if metadata_format == "oai_dc":
-                    # Dublin Core extraction
                     elem = metadata.find(f".//{field_to_harvest}", ns)
                     if elem is not None and elem.text:
                         all_values.append(elem.text.strip())
                 else:
-                    # MARC extraction
                     marc_record = metadata.find("marc:record", ns)
                     if marc_record is not None:
                         for datafield in marc_record.findall("marc:datafield", ns):
@@ -82,7 +83,7 @@ if st.button("Start Harvesting"):
                                 if subfield is not None and subfield.text:
                                     all_values.append(subfield.text.strip())
             
-            # Check for resumptionToken
+            # Handle resumptionToken safely
             token_elem = root.find(".//oai:resumptionToken", ns)
             if token_elem is None or token_elem.text is None or token_elem.text.strip() == "":
                 break
