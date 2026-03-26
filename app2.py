@@ -4,59 +4,41 @@ from xml.etree import ElementTree as ET
 import pandas as pd
 
 st.set_page_config(page_title="OAI‑PMH Harvester", layout="wide")
-st.title("OAI‑PMH Extractor — Open Metadata & Fields/Subfields")
+st.title("OAI‑PMH Extractor — Field & Subfield CSV Export")
 
-# --- 1️⃣ Base URL input ---
+# --- 1️⃣ Input OAI-PMH Base URL ---
 base_url = st.text_input(
     "OAI‑PMH Base URL",
     value="https://OAI-PMH_Base_URL/oai/request",
-    help="Enter the base URL of the OAI-PMH repository"
+    help="Enter the OAI-PMH repository URL to harvest"
 )
 
-# --- 2️⃣ Metadata format (metadataPrefix) ---
-st.markdown("### Metadata Format (metadataPrefix)")
-metadata_suggestions = ["oai_dc", "marc21", "marcxml", "mods", "dim", "emd", "md", "mets"]
+# --- 2️⃣ Metadata format (user input) ---
 metadata_prefix = st.text_input(
-    "Metadata Format",
+    "Metadata Format (metadataPrefix)",
     value="oai_dc",
-    help="Enter the metadata format to harvest. Examples: oai_dc, marcxml, mods, etc."
+    help="Enter metadata format (e.g., oai_dc, marcxml, mods, etc.)"
 )
 
-# --- 3️⃣ Fields & Subfields ---
-st.markdown("### Fields & Subfields to Extract")
+# --- 3️⃣ Field and optional Subfield input ---
 st.markdown(
-    "You can select suggested fields or type any field/subfield manually (one per line, e.g., `dc:type`, `marc:245$a`)."
+    "### Field and Subfield to Extract\n"
+    "For institutional repositories, input fields like `dc:type`.\n"
+    "For catalogs, you can input fields and subfields like `952$d`."
+)
+field_input = st.text_input(
+    "Field (and subfield)",
+    value="dc:type",
+    help="Enter the field (and optional subfield) to extract, e.g., dc:type or 952$d"
 )
 
-# Suggested fields dropdown
-field_suggestions = [
-    "dc:title", "dc:creator", "dc:subject", "dc:description",
-    "dc:type", "dc:publisher", "dc:date", "dc:identifier"
-]
-selected_fields = st.multiselect(
-    "Suggested Fields",
-    options=field_suggestions,
-    default=["dc:type"]
-)
-
-# Manual fields input
-manual_fields = st.text_area(
-    "Manual Fields/Subfields",
-    placeholder="dc:type\ndc:creator\nmarc:245$a",
-    help="Enter any additional fields/subfields you want to harvest, one per line"
-)
-
-# Combine both lists
-manual_fields_list = [f.strip() for f in manual_fields.splitlines() if f.strip()]
-fields_to_extract = list(set(selected_fields + manual_fields_list))
-
-# --- 4️⃣ Run Extraction ---
+# --- 4️⃣ Run button ---
 if st.button("Run Extraction"):
 
-    if not fields_to_extract:
-        st.warning("Please select or enter at least one field/subfield to extract.")
+    if not base_url or not metadata_prefix or not field_input:
+        st.warning("Please fill in Base URL, Metadata Format, and Field/Subfield.")
     else:
-        st.info(f"Fetching records from {base_url} using metadata format '{metadata_prefix}'...")
+        st.info(f"Harvesting field '{field_input}' from {base_url}...")
 
         params = {
             "verb": "ListRecords",
@@ -65,68 +47,78 @@ if st.button("Run Extraction"):
 
         try:
             # SSL verification disabled for testing
-            response = requests.get(base_url, params=params, verify=False, timeout=20)
+            response = requests.get(base_url, params=params, verify=False, timeout=30)
+            response.raise_for_status()
 
-            if response.status_code != 200:
-                st.error(f"HTTP {response.status_code} Error accessing the OAI-PMH endpoint.")
+            # Parse XML
+            xml_root = ET.fromstring(response.text)
+
+            # Namespaces
+            ns = {
+                "oai": "http://www.openarchives.org/OAI/2.0/",
+                "dc": "http://purl.org/dc/elements/1.1/",
+                "marc": "http://www.loc.gov/MARC21/slim"
+            }
+
+            # Extract records
+            records = xml_root.findall(".//oai:record", ns)
+            if not records:
+                st.warning("No records found.")
             else:
-                st.success("Records fetched successfully!")
+                st.info(f"Found {len(records)} records. Extracting values for '{field_input}'...")
 
-                # Parse XML
-                xml_root = ET.fromstring(response.text)
-
-                # Default namespaces
-                ns = {
-                    "oai": "http://www.openarchives.org/OAI/2.0/",
-                    "dc": "http://purl.org/dc/elements/1.1/",
-                    "marc": "http://www.loc.gov/MARC21/slim"
-                }
-
-                # Extract records
-                records = xml_root.findall(".//oai:record", ns)
-
-                if not records:
-                    st.warning("No records found.")
+                # Determine prefix and tag/subfield
+                if ":" in field_input:
+                    prefix, tag = field_input.split(":", 1)
+                elif "$" in field_input:
+                    tag, subfield = field_input.split("$", 1)
+                    prefix = "marc"
                 else:
-                    st.info(f"Found {len(records)} records. Extracting fields...")
+                    tag = field_input
+                    prefix = ""
 
-                    data_rows = []
+                extracted_values = []
 
-                    for rec in records:
-                        row = {}
-                        for field in fields_to_extract:
-                            if ":" in field:
-                                prefix, tag_name = field.split(":", 1)
-                            else:
-                                prefix, tag_name = "", field
+                for rec in records:
+                    if prefix == "marc":
+                        # MARC: find datafield with tag and subfield code
+                        datafields = rec.findall(f".//marc:datafield[@tag='{tag}']", ns)
+                        for df in datafields:
+                            subfields = df.findall(f"marc:subfield[@code='{subfield}']", ns)
+                            for sf in subfields:
+                                if sf.text:
+                                    extracted_values.append(sf.text)
+                    elif prefix:
+                        # Namespaced fields (e.g., dc)
+                        nodes = rec.findall(f".//{prefix}:{tag}", ns)
+                        for n in nodes:
+                            if n.text:
+                                extracted_values.append(n.text)
+                    else:
+                        # Non-namespaced
+                        nodes = rec.findall(f".//{tag}")
+                        for n in nodes:
+                            if n.text:
+                                extracted_values.append(n.text)
 
-                            ns_prefix = ns.get(prefix, "")
-                            if ns_prefix:
-                                nodes = rec.findall(f".//{prefix}:{tag_name}", ns)
-                            else:
-                                nodes = rec.findall(f".//{tag_name}")
-
-                            row[field] = "; ".join([n.text for n in nodes if n.text])
-                        data_rows.append(row)
-
-                    # Convert to DataFrame
-                    df = pd.DataFrame(data_rows)
-                    st.write("### Extracted Records")
+                if extracted_values:
+                    df = pd.DataFrame({field_input: extracted_values})
+                    st.write(f"### Extracted Values ({len(extracted_values)})")
                     st.dataframe(df)
 
                     # CSV download
-                    csv = df.to_csv(index=False).encode('utf-8')
+                    csv = df.to_csv(index=False).encode("utf-8")
                     st.download_button(
                         label="Download CSV",
                         data=csv,
-                        file_name='oai_records.csv',
-                        mime='text/csv'
+                        file_name=f"oai_harvest_{field_input.replace('$','_')}.csv",
+                        mime="text/csv"
                     )
+                else:
+                    st.warning(f"No values found for field '{field_input}'.")
 
-        except requests.exceptions.SSLError as ssl_err:
-            st.error("SSL Error — certificate verification failed. Use verify=False for testing.")
-            st.text(str(ssl_err))
+        except requests.exceptions.RequestException as e:
+            st.error(f"Request Error: {str(e)}")
 
-        except Exception as e:
-            st.error("An unexpected error occurred:")
-            st.text(str(e))
+        except ET.ParseError as e:
+            st.error(f"XML Parse Error: {str(e)}")
